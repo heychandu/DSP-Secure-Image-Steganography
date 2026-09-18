@@ -2,6 +2,9 @@ clc;
 clear;
 close all;
 
+%% V4 - DSP Processing
+% Sampling + Quantization + PN Scrambling + LSB Steganography
+
 %% 1. Load Cover Image
 
 [coverFile, coverPath] = uigetfile( ...
@@ -30,15 +33,58 @@ if isequal(secretFile,0)
     error('No secret image selected.');
 end
 
-secret = imread(fullfile(secretPath,secretFile));
+secretOriginal = imread(fullfile(secretPath,secretFile));
 
-if size(secret,3) == 3
-    secret = rgb2gray(secret);
+if size(secretOriginal,3) == 3
+    secretOriginal = rgb2gray(secretOriginal);
 end
 
-secret = uint8(secret);
+secretOriginal = uint8(secretOriginal);
 
-%% 3. Check and Resize Secret Image
+%% 3. Sampling
+
+samplingFactor = 2;
+
+secretSampled = secretOriginal( ...
+    1:samplingFactor:end, ...
+    1:samplingFactor:end);
+
+fprintf('\nDSP SAMPLING\n');
+fprintf('Original Secret : %d x %d\n', ...
+    size(secretOriginal,1),size(secretOriginal,2));
+
+fprintf('Sampling Factor : %d\n',samplingFactor);
+
+fprintf('Sampled Secret  : %d x %d\n', ...
+    size(secretSampled,1),size(secretSampled,2));
+
+%% 4. Quantization
+
+numberOfLevels = 16;
+
+quantStep = 255/(numberOfLevels-1);
+
+secretQuantized = uint8( ...
+    round(double(secretSampled)/quantStep)*quantStep);
+
+%% 5. Display DSP Processing
+
+figure('Name','V4 - DSP Processing', ...
+    'NumberTitle','off');
+
+subplot(1,3,1);
+imshow(secretOriginal);
+title('Original Secret');
+
+subplot(1,3,2);
+imshow(secretSampled);
+title('Sampled Secret');
+
+subplot(1,3,3);
+imshow(secretQuantized);
+title('Quantized Secret');
+
+%% 6. Check Cover Capacity
 
 maxSecretPixels = floor((numel(cover)-32)/8);
 
@@ -46,35 +92,34 @@ if maxSecretPixels < 1
     error('Cover image is too small.');
 end
 
-if numel(secret) > maxSecretPixels
+if numel(secretQuantized) > maxSecretPixels
 
-    scale = sqrt(maxSecretPixels / numel(secret));
+    scale = sqrt(maxSecretPixels / numel(secretQuantized));
 
-    newRows = max(1,floor(size(secret,1)*scale));
-    newCols = max(1,floor(size(secret,2)*scale));
+    newRows = max(1,floor(size(secretQuantized,1)*scale));
+    newCols = max(1,floor(size(secretQuantized,2)*scale));
 
-    secret = imresize(secret,[newRows newCols]);
+    secretQuantized = imresize( ...
+        secretQuantized,[newRows newCols]);
 
 end
 
-fprintf('\nSecret Image Size: %d x %d\n', ...
-    size(secret,1),size(secret,2));
-
-%% 4. Generate PN Sequence
+%% 7. PN Sequence Scrambling
 
 rng(10);
 
-pn = uint8(randi([0 255],size(secret)));
+pn = uint8( ...
+    randi([0 255],size(secretQuantized)));
 
-%% 5. PN Sequence Scrambling
+encrypted = bitxor( ...
+    secretQuantized,pn);
 
-encrypted = bitxor(secret,pn);
-
-%% 6. Convert Encrypted Image to 8-bit Stream
+%% 8. Convert Encrypted Image to Bits
 
 encryptedVector = encrypted(:);
 
-secretBits = zeros(numel(encryptedVector)*8,1,'uint8');
+secretBits = zeros( ...
+    numel(encryptedVector)*8,1,'uint8');
 
 index = 1;
 
@@ -82,7 +127,8 @@ for k = 1:length(encryptedVector)
 
     for bit = 1:8
 
-        secretBits(index) = bitget(encryptedVector(k),bit);
+        secretBits(index) = ...
+            bitget(encryptedVector(k),bit);
 
         index = index + 1;
 
@@ -90,10 +136,10 @@ for k = 1:length(encryptedVector)
 
 end
 
-%% 7. Create Image Dimension Header
+%% 9. Create Image Dimension Header
 
-rows = size(secret,1);
-cols = size(secret,2);
+rows = size(secretQuantized,1);
+cols = size(secretQuantized,2);
 
 header = [uint16(rows); uint16(cols)];
 
@@ -107,7 +153,8 @@ for k = 1:length(headerBytes)
 
     for bit = 1:8
 
-        headerBits(index) = bitget(headerBytes(k),bit);
+        headerBits(index) = ...
+            bitget(headerBytes(k),bit);
 
         index = index + 1;
 
@@ -115,52 +162,49 @@ for k = 1:length(headerBytes)
 
 end
 
-%% 8. Combine Header and Image Data
+%% 10. Combine Header and Secret Data
 
 dataBits = [headerBits; secretBits];
 
-%% 9. Check Capacity
-
 if numel(dataBits) > numel(cover)
-
     error('Cover image is too small for the secret image.');
-
 end
 
-%% 10. LSB Embedding
+%% 11. LSB Embedding
 
 stegoVector = cover(:);
 
 for k = 1:length(dataBits)
 
-    stegoVector(k) = bitset( ...
-        stegoVector(k),1,dataBits(k));
+    stegoVector(k) = ...
+        bitset(stegoVector(k),1,dataBits(k));
 
 end
 
-stego = reshape(stegoVector,size(cover));
+stego = reshape( ...
+    stegoVector,size(cover));
 
-%% =========================================================
-% DECODING
-%% =========================================================
-
-%% 11. Extract LSB Data
+%% 12. LSB Extraction
 
 stegoVector = stego(:);
 
-extractedBits = zeros(length(dataBits),1,'uint8');
+extractedBits = zeros( ...
+    length(dataBits),1,'uint8');
 
 for k = 1:length(dataBits)
 
-    extractedBits(k) = bitget(stegoVector(k),1);
+    extractedBits(k) = ...
+        bitget(stegoVector(k),1);
 
 end
 
-%% 12. Extract Header
+%% 13. Extract Header
 
-headerBitsReceived = extractedBits(1:32);
+headerBitsReceived = ...
+    extractedBits(1:32);
 
-headerBytesReceived = zeros(4,1,'uint8');
+headerBytesReceived = ...
+    zeros(4,1,'uint8');
 
 index = 1;
 
@@ -171,7 +215,8 @@ for k = 1:4
     for bit = 1:8
 
         value = bitset( ...
-            value,bit,headerBitsReceived(index));
+            value,bit, ...
+            headerBitsReceived(index));
 
         index = index + 1;
 
@@ -187,15 +232,15 @@ dimensions = typecast( ...
 rowsReceived = double(dimensions(1));
 colsReceived = double(dimensions(2));
 
-%% 13. Extract Encrypted Image
+%% 14. Extract Encrypted Image
 
 numberOfSecretBits = ...
     rowsReceived * colsReceived * 8;
 
-encryptedBits = ...
-    extractedBits(33:32+numberOfSecretBits);
+encryptedBits = extractedBits( ...
+    33:32+numberOfSecretBits);
 
-%% 14. Convert Bits to Image Bytes
+%% 15. Convert Bits Back to Bytes
 
 encryptedRecovered = ...
     zeros(rowsReceived*colsReceived,1,'uint8');
@@ -209,7 +254,8 @@ for k = 1:length(encryptedRecovered)
     for bit = 1:8
 
         value = bitset( ...
-            value,bit,encryptedBits(index));
+            value,bit, ...
+            encryptedBits(index));
 
         index = index + 1;
 
@@ -219,13 +265,13 @@ for k = 1:length(encryptedRecovered)
 
 end
 
-%% 15. Reconstruct Encrypted Image
+%% 16. Reconstruct Encrypted Image
 
 encryptedRecovered = reshape( ...
     encryptedRecovered, ...
     [rowsReceived colsReceived]);
 
-%% 16. Generate Same PN Sequence
+%% 17. PN Descrambling
 
 rng(10);
 
@@ -233,69 +279,54 @@ pnReceived = uint8( ...
     randi([0 255], ...
     [rowsReceived colsReceived]));
 
-%% 17. Recover Original Secret
-
 recovered = bitxor( ...
     encryptedRecovered,pnReceived);
 
-%% =========================================================
-% PERFORMANCE ANALYSIS
-%% =========================================================
+%% 18. Recovery Performance
 
-%% 18. Secret vs Recovered Image
-
-secretMSE = mean( ...
-    (double(secret(:)) - ...
+mseRecovery = mean( ...
+    (double(secretQuantized(:)) - ...
      double(recovered(:))).^2);
 
-if secretMSE == 0
-
-    secretPSNR = Inf;
-
+if mseRecovery == 0
+    psnrRecovery = Inf;
 else
-
-    secretPSNR = ...
-        10*log10(255^2/secretMSE);
-
+    psnrRecovery = ...
+        10*log10(255^2/mseRecovery);
 end
 
-secretSSIM = calculateSSIM(secret,recovered);
+ssimRecovery = calculateSSIM( ...
+    secretQuantized,recovered);
 
-%% 19. Cover vs Stego Image
+%% 19. Stego Image Performance
 
-coverMSE = mean( ...
+mseStego = mean( ...
     (double(cover(:)) - ...
      double(stego(:))).^2);
 
-if coverMSE == 0
-
-    coverPSNR = Inf;
-
+if mseStego == 0
+    psnrStego = Inf;
 else
-
-    coverPSNR = ...
-        10*log10(255^2/coverMSE);
-
+    psnrStego = ...
+        10*log10(255^2/mseStego);
 end
 
-coverSSIM = calculateSSIM(cover,stego);
+ssimStego = calculateSSIM(cover,stego);
 
 %% 20. Difference Images
 
-secretDifference = uint8(abs( ...
-    double(secret) - ...
+recoveryDifference = uint8(abs( ...
+    double(secretQuantized) - ...
     double(recovered)));
 
-coverDifference = uint8(abs( ...
+stegoDifference = uint8(abs( ...
     double(cover) - ...
     double(stego)));
 
-%% =========================================================
-% DISPLAY RESULTS
-%% =========================================================
+%% 21. Display Complete Results
 
 figure('Name', ...
-    'DSP Secure Image Steganography - V3', ...
+    'DSP Secure Image Steganography - V4', ...
     'NumberTitle','off');
 
 subplot(2,4,1);
@@ -303,109 +334,77 @@ imshow(cover);
 title('Cover Image');
 
 subplot(2,4,2);
-imshow(secret);
+imshow(secretOriginal);
 title('Original Secret');
 
 subplot(2,4,3);
-imshow(encrypted);
-title('PN Scrambled Secret');
+imshow(secretSampled);
+title('Sampled Secret');
 
 subplot(2,4,4);
+imshow(secretQuantized);
+title('Quantized Secret');
+
+subplot(2,4,5);
+imshow(encrypted);
+title('PN Scrambled');
+
+subplot(2,4,6);
 imshow(stego);
 title('Stego Image');
 
-subplot(2,4,5);
-imshow(recovered);
-title('Recovered Secret');
-
-subplot(2,4,6);
-imshow(secretDifference);
-title('Secret Difference');
-
 subplot(2,4,7);
-imshow(coverDifference);
-title('Cover-Stego Difference');
+imshow(recovered);
+title('Recovered Image');
 
 subplot(2,4,8);
-axis off;
+imshow(recoveryDifference);
+title('Recovery Difference');
 
-text(0,0.90,'PERFORMANCE RESULTS', ...
-    'FontSize',12,'FontWeight','bold');
+%% 22. Display Results
 
-text(0,0.70,sprintf( ...
-    'Secret MSE = %.10f',secretMSE), ...
-    'FontSize',10);
+fprintf('\nV4 DSP PROCESSING RESULTS\n');
+fprintf('\nDSP PARAMETERS\n');
 
-text(0,0.55,sprintf( ...
-    'Secret PSNR = %.2f dB',secretPSNR), ...
-    'FontSize',10);
+fprintf('Sampling Factor : %d\n',samplingFactor);
+fprintf('Quantization    : %d levels\n',numberOfLevels);
+fprintf('Quantization    : 4-bit\n');
 
-text(0,0.40,sprintf( ...
-    'Secret SSIM = %.6f',secretSSIM), ...
-    'FontSize',10);
+fprintf('\nIMAGE SIZES\n');
 
-text(0,0.20,sprintf( ...
-    'Stego PSNR = %.2f dB',coverPSNR), ...
-    'FontSize',10);
+fprintf('Original Secret : %d x %d\n', ...
+    size(secretOriginal,1), ...
+    size(secretOriginal,2));
 
-text(0,0.05,sprintf( ...
-    'Stego SSIM = %.6f',coverSSIM), ...
-    'FontSize',10);
+fprintf('Sampled Secret  : %d x %d\n', ...
+    size(secretSampled,1), ...
+    size(secretSampled,2));
 
-%% =========================================================
-% COMMAND WINDOW RESULTS
-%% =========================================================
+fprintf('Processed Image : %d x %d\n', ...
+    size(secretQuantized,1), ...
+    size(secretQuantized,2));
 
-fprintf('\n');
-fprintf('============================================\n');
-fprintf('       V3 PERFORMANCE ANALYSIS RESULTS\n');
-fprintf('============================================\n');
+fprintf('\nRECOVERY QUALITY\n');
 
-fprintf('\nSECRET IMAGE RECOVERY\n');
-fprintf('--------------------------------------------\n');
-
-fprintf('MSE  : %.10f\n',secretMSE);
-fprintf('PSNR : %.2f dB\n',secretPSNR);
-fprintf('SSIM : %.6f\n',secretSSIM);
+fprintf('MSE  : %.10f\n',mseRecovery);
+fprintf('PSNR : %.2f dB\n',psnrRecovery);
+fprintf('SSIM : %.6f\n',ssimRecovery);
 
 fprintf('\nSTEGO IMAGE QUALITY\n');
-fprintf('--------------------------------------------\n');
 
-fprintf('MSE  : %.10f\n',coverMSE);
-fprintf('PSNR : %.2f dB\n',coverPSNR);
-fprintf('SSIM : %.6f\n',coverSSIM);
+fprintf('MSE  : %.10f\n',mseStego);
+fprintf('PSNR : %.2f dB\n',psnrStego);
+fprintf('SSIM : %.6f\n',ssimStego);
 
-fprintf('\nIMAGE INFORMATION\n');
-fprintf('--------------------------------------------\n');
+fprintf('\n');
 
-fprintf('Cover Image    : %d x %d\n', ...
-    size(cover,1),size(cover,2));
-
-fprintf('Secret Image   : %d x %d\n', ...
-    size(secret,1),size(secret,2));
-
-fprintf('Payload        : %.2f KB\n', ...
-    numel(secret)/1024);
-
-fprintf('\nRECOVERY STATUS\n');
-fprintf('--------------------------------------------\n');
-
-if secretMSE == 0
-
-    fprintf('Perfect Recovery: YES\n');
-
+if mseRecovery == 0
+    fprintf('DSP Processed Image Recovery: PERFECT\n');
 else
-
-    fprintf('Perfect Recovery: NO\n');
-
+    fprintf('DSP Processed Image Recovery: CHECK RESULTS\n');
 end
 
-fprintf('\n============================================\n');
-
-
-%% =========================================================
-% SSIM FUNCTION
-%% =========================================================
+%% 23. SSIM Function
 
 function ssimValue = calculateSSIM(A,B)
 
@@ -427,13 +426,13 @@ function ssimValue = calculateSSIM(A,B)
     C2 = (0.03*L)^2;
 
     numerator = ...
-        (2*muA*muB + C1) * ...
-        (2*covarianceAB + C2);
+        (2*muA*muB+C1) * ...
+        (2*covarianceAB+C2);
 
     denominator = ...
-        (muA^2 + muB^2 + C1) * ...
-        (varianceA + varianceB + C2);
+        (muA^2+muB^2+C1) * ...
+        (varianceA+varianceB+C2);
 
-    ssimValue = numerator / denominator;
+    ssimValue = numerator/denominator;
 
 end
