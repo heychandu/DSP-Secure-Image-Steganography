@@ -1,35 +1,40 @@
-function DSP_Secure_Image_Steganography_V7
+function DSP_Secure_Image_Steganography_V8
 
 clc;
 close all;
 
 cover = [];
-secretOriginal = [];
+secret = [];
+stego = [];
+recovered = [];
 
 fig = uifigure( ...
-    'Name','DSP Secure Image Steganography - V7', ...
+    'Name','DSP Secure Image Steganography - V8', ...
     'Position',[50 50 1500 850]);
 
 mainGrid = uigridlayout(fig,[3 1]);
-mainGrid.RowHeight = {60,520,'1x'};
-mainGrid.ColumnWidth = {'1x'};
+mainGrid.RowHeight = {65,500,'1x'};
 
-buttonGrid = uigridlayout(mainGrid,[1 4]);
-buttonGrid.ColumnWidth = {'1x','1x','1x','1x'};
+buttonGrid = uigridlayout(mainGrid,[1 5]);
+buttonGrid.ColumnWidth = {'1x','1x','1x','1.2x','0.8x'};
 
-selectCoverButton = uibutton(buttonGrid, ...
+uibutton(buttonGrid, ...
     'Text','Select Cover Image', ...
     'ButtonPushedFcn',@selectCover);
 
-selectSecretButton = uibutton(buttonGrid, ...
+uibutton(buttonGrid, ...
     'Text','Select Secret Image', ...
     'ButtonPushedFcn',@selectSecret);
 
-runButton = uibutton(buttonGrid, ...
-    'Text','Run DSP Pipeline', ...
-    'ButtonPushedFcn',@runPipeline);
+uibutton(buttonGrid, ...
+    'Text','Embed Secret', ...
+    'ButtonPushedFcn',@embedSecret);
 
-clearButton = uibutton(buttonGrid, ...
+uibutton(buttonGrid, ...
+    'Text','Extract with PIN', ...
+    'ButtonPushedFcn',@extractSecret);
+
+uibutton(buttonGrid, ...
     'Text','Clear', ...
     'ButtonPushedFcn',@clearAll);
 
@@ -47,8 +52,10 @@ ax6 = uiaxes(imageGrid);
 ax7 = uiaxes(imageGrid);
 ax8 = uiaxes(imageGrid);
 ax9 = uiaxes(imageGrid);
+ax10 = uiaxes(imageGrid);
 
-axesList = [ax1 ax2 ax3 ax4 ax5 ax6 ax7 ax8 ax9];
+axesList = [ax1 ax2 ax3 ax4 ax5 ...
+            ax6 ax7 ax8 ax9 ax10];
 
 for k = 1:length(axesList)
     axesList(k).XTick = [];
@@ -58,23 +65,30 @@ end
 resultsArea = uitextarea(mainGrid, ...
     'Editable','off', ...
     'FontName','Courier New', ...
-    'FontSize',13);
+    'FontSize',12);
 
-showPlaceholder(ax1,'Original Secret');
-showPlaceholder(ax2,'Sampled Secret');
-showPlaceholder(ax3,'Quantized Secret');
-showPlaceholder(ax4,'Decimated Secret');
+showPlaceholder(ax1,'Cover Image');
+showPlaceholder(ax2,'Original Secret');
+showPlaceholder(ax3,'Sampled Secret');
+showPlaceholder(ax4,'Quantized Secret');
 showPlaceholder(ax5,'PN Scrambled');
 showPlaceholder(ax6,'Stego Image');
-showPlaceholder(ax7,'Recovered Decimated');
-showPlaceholder(ax8,'Reconstructed Image');
-showPlaceholder(ax9,'Reconstruction Difference');
+showPlaceholder(ax7,'Extracted Data');
+showPlaceholder(ax8,'Recovered Secret');
+showPlaceholder(ax9,'Difference');
+showPlaceholder(ax10,'Status');
+
+resultsArea.Value = { ...
+    'V8 DSP SECURE IMAGE STEGANOGRAPHY'; ...
+    ''; ...
+    'Select a cover image and secret image.'; ...
+    'Enter a PIN when embedding and use the same PIN during extraction.'};
 
 function selectCover(~,~)
 
     [file,path] = uigetfile( ...
         {'*.png;*.jpg;*.jpeg;*.bmp','Image Files'}, ...
-        'Select Cover Image');
+        'Select RGB Cover Image');
 
     if isequal(file,0)
         return;
@@ -82,15 +96,24 @@ function selectCover(~,~)
 
     cover = imread(fullfile(path,file));
 
-    if size(cover,3) == 3
-        cover = rgb2gray(cover);
+    if size(cover,3) ~= 3
+        uialert(fig, ...
+            'Please select an RGB cover image.', ...
+            'Invalid Cover Image');
+        cover = [];
+        return;
     end
 
     cover = uint8(cover);
 
+    imshow(cover,'Parent',ax1);
+    title(ax1,'Cover Image');
+
     resultsArea.Value = { ...
-        ['Cover image selected: ' file]; ...
-        sprintf('Size: %d x %d',size(cover,1),size(cover,2))};
+        'Cover image selected'; ...
+        ['File: ' file]; ...
+        sprintf('Size: %d x %d x 3', ...
+        size(cover,1),size(cover,2))};
 
 end
 
@@ -98,282 +121,274 @@ function selectSecret(~,~)
 
     [file,path] = uigetfile( ...
         {'*.png;*.jpg;*.jpeg;*.bmp','Image Files'}, ...
-        'Select Secret Image');
+        'Select RGB Secret Image');
 
     if isequal(file,0)
         return;
     end
 
-    secretOriginal = imread(fullfile(path,file));
+    secret = imread(fullfile(path,file));
 
-    if size(secretOriginal,3) == 3
-        secretOriginal = rgb2gray(secretOriginal);
+    if size(secret,3) ~= 3
+        uialert(fig, ...
+            'Please select an RGB secret image.', ...
+            'Invalid Secret Image');
+        secret = [];
+        return;
     end
 
-    secretOriginal = uint8(secretOriginal);
+    secret = uint8(secret);
+
+    imshow(secret,'Parent',ax2);
+    title(ax2,'Original Secret');
 
     resultsArea.Value = { ...
-        ['Secret image selected: ' file]; ...
-        sprintf('Size: %d x %d', ...
-        size(secretOriginal,1), ...
-        size(secretOriginal,2))};
+        'Secret image selected'; ...
+        ['File: ' file]; ...
+        sprintf('Size: %d x %d x 3', ...
+        size(secret,1),size(secret,2))};
 
 end
 
-function runPipeline(~,~)
+function embedSecret(~,~)
 
     if isempty(cover)
         uialert(fig, ...
-            'Please select a cover image first.', ...
+            'Select a cover image first.', ...
             'Missing Cover Image');
         return;
     end
 
-    if isempty(secretOriginal)
+    if isempty(secret)
         uialert(fig, ...
-            'Please select a secret image first.', ...
+            'Select a secret image first.', ...
             'Missing Secret Image');
         return;
     end
 
+    answer = inputdlg( ...
+        'Enter PIN:', ...
+        'PIN Authentication', ...
+        [1 30], ...
+        {''});
+
+    if isempty(answer)
+        return;
+    end
+
+    pin = answer{1};
+
+    if isempty(pin)
+        uialert(fig, ...
+            'PIN cannot be empty.', ...
+            'Invalid PIN');
+        return;
+    end
+
+    tic;
+
     samplingFactor = 2;
     numberOfLevels = 16;
-    decimationFactor = 2;
 
-    secretSampled = secretOriginal( ...
+    secretSampled = secret( ...
         1:samplingFactor:end, ...
-        1:samplingFactor:end);
+        1:samplingFactor:end, :);
 
     quantStep = 255/(numberOfLevels-1);
 
     secretQuantized = uint8( ...
         round(double(secretSampled)/quantStep)*quantStep);
 
-    secretDecimated = secretQuantized( ...
-        1:decimationFactor:end, ...
-        1:decimationFactor:end);
+    imshow(secretSampled,'Parent',ax3);
+    title(ax3,'Sampled Secret');
 
-    maxSecretPixels = floor((numel(cover)-32)/8);
+    imshow(secretQuantized,'Parent',ax4);
+    title(ax4,'Quantized Secret');
 
-    if maxSecretPixels < 1
-        uialert(fig, ...
-            'Cover image is too small.', ...
-            'Capacity Error');
-        return;
-    end
+    payload = secretQuantized(:);
 
-    if numel(secretDecimated) > maxSecretPixels
+    seed = createSeed(pin);
 
-        scale = sqrt( ...
-            maxSecretPixels / ...
-            numel(secretDecimated));
-
-        newRows = max(1, ...
-            floor(size(secretDecimated,1)*scale));
-
-        newCols = max(1, ...
-            floor(size(secretDecimated,2)*scale));
-
-        secretDecimated = imresize( ...
-            secretDecimated,[newRows newCols]);
-
-    end
-
-    rng(10);
+    rng(seed);
 
     pn = uint8( ...
-        randi([0 255], ...
-        size(secretDecimated)));
+        randi([0 255],size(payload)));
 
-    encrypted = bitxor( ...
-        secretDecimated,pn);
+    scrambledVector = bitxor(payload,pn);
 
-    encryptedVector = encrypted(:);
+    scrambled = reshape( ...
+        scrambledVector, ...
+        size(secretQuantized));
 
-    secretBits = zeros( ...
-        numel(encryptedVector)*8,1,'uint8');
+    imshow(scrambled,'Parent',ax5);
+    title(ax5,'PN Scrambled');
 
-    index = 1;
+    rows = size(secretQuantized,1);
+    cols = size(secretQuantized,2);
 
-    for k = 1:length(encryptedVector)
-
-        for bit = 1:8
-
-            secretBits(index) = ...
-                bitget(encryptedVector(k),bit);
-
-            index = index + 1;
-
-        end
-
-    end
-
-    rows = size(secretDecimated,1);
-    cols = size(secretDecimated,2);
-
-    header = [uint16(rows);uint16(cols)];
+    header = [ ...
+        uint32(rows); ...
+        uint32(cols)];
 
     headerBytes = typecast(header,'uint8');
 
-    headerBits = zeros(32,1,'uint8');
+    dataBytes = [headerBytes; scrambledVector];
 
-    index = 1;
+    requiredBytes = length(dataBytes);
 
-    for k = 1:length(headerBytes)
+    coverPixels = size(cover,1)*size(cover,2);
 
-        for bit = 1:8
+    if requiredBytes > coverPixels
 
-            headerBits(index) = ...
-                bitget(headerBytes(k),bit);
+        scale = sqrt( ...
+            (coverPixels-8)/ ...
+            numel(secretQuantized));
 
-            index = index + 1;
+        newRows = max(1, ...
+            floor(size(secretQuantized,1)*scale));
 
-        end
+        newCols = max(1, ...
+            floor(size(secretQuantized,2)*scale));
+
+        secretQuantized = imresize( ...
+            secretQuantized, ...
+            [newRows newCols]);
+
+        payload = secretQuantized(:);
+
+        rng(seed);
+
+        pn = uint8( ...
+            randi([0 255],size(payload)));
+
+        scrambledVector = bitxor(payload,pn);
+
+        scrambled = reshape( ...
+            scrambledVector, ...
+            size(secretQuantized));
+
+        rows = size(secretQuantized,1);
+        cols = size(secretQuantized,2);
+
+        header = [ ...
+            uint32(rows); ...
+            uint32(cols)];
+
+        headerBytes = typecast(header,'uint8');
+
+        dataBytes = [headerBytes;scrambledVector];
+
+        requiredBytes = length(dataBytes);
 
     end
 
-    dataBits = [headerBits;secretBits];
-
-    if numel(dataBits) > numel(cover)
+    if requiredBytes > coverPixels
 
         uialert(fig, ...
-            'Cover image does not have enough capacity.', ...
+            'Secret image is too large for this cover image.', ...
             'Capacity Error');
         return;
     end
 
-    stegoVector = cover(:);
-
-    for k = 1:length(dataBits)
-
-        stegoVector(k) = ...
-            bitset(stegoVector(k),1,dataBits(k));
-
-    end
-
-    stego = reshape( ...
-        stegoVector,size(cover));
-
-    stegoVector = stego(:);
-
-    extractedBits = zeros( ...
-        length(dataBits),1,'uint8');
-
-    for k = 1:length(dataBits)
-
-        extractedBits(k) = ...
-            bitget(stegoVector(k),1);
-
-    end
-
-    headerBitsReceived = ...
-        extractedBits(1:32);
-
-    headerBytesReceived = ...
-        zeros(4,1,'uint8');
+    dataBits = zeros( ...
+        requiredBytes*8,1,'uint8');
 
     index = 1;
 
-    for k = 1:4
-
-        value = uint8(0);
+    for k = 1:requiredBytes
 
         for bit = 1:8
 
-            value = bitset( ...
-                value,bit, ...
-                headerBitsReceived(index));
+            dataBits(index) = ...
+                bitget(dataBytes(k),bit);
 
             index = index + 1;
 
         end
 
-        headerBytesReceived(k) = value;
-
     end
 
-    dimensions = typecast( ...
-        headerBytesReceived,'uint16');
+    stego = cover;
 
-    rowsReceived = double(dimensions(1));
-    colsReceived = double(dimensions(2));
+    bitIndex = 1;
 
-    numberOfSecretBits = ...
-        rowsReceived*colsReceived*8;
+    for pixel = 1:coverPixels
 
-    encryptedBits = extractedBits( ...
-        33:32+numberOfSecretBits);
+        if bitIndex > length(dataBits)
+            break;
+        end
 
-    encryptedRecovered = ...
-        zeros(rowsReceived*colsReceived,1,'uint8');
+        r = stego(pixel);
+        g = stego(coverPixels + pixel);
+        b = stego(2*coverPixels + pixel);
 
-    index = 1;
+        rBits = uint8(0);
+        gBits = uint8(0);
+        bBits = uint8(0);
 
-    for k = 1:length(encryptedRecovered)
+        for bit = 1:3
 
-        value = uint8(0);
-
-        for bit = 1:8
-
-            value = bitset( ...
-                value,bit, ...
-                encryptedBits(index));
-
-            index = index + 1;
+            if bitIndex <= length(dataBits)
+                rBits = bitor( ...
+                    rBits, ...
+                    bitshift(dataBits(bitIndex),bit-1));
+                bitIndex = bitIndex + 1;
+            end
 
         end
 
-        encryptedRecovered(k) = value;
+        for bit = 1:3
+
+            if bitIndex <= length(dataBits)
+                gBits = bitor( ...
+                    gBits, ...
+                    bitshift(dataBits(bitIndex),bit-1));
+                bitIndex = bitIndex + 1;
+            end
+
+        end
+
+        for bit = 1:2
+
+            if bitIndex <= length(dataBits)
+                bBits = bitor( ...
+                    bBits, ...
+                    bitshift(dataBits(bitIndex),bit-1));
+                bitIndex = bitIndex + 1;
+            end
+
+        end
+
+        stego(pixel) = bitset( ...
+            stego(pixel),1,bitget(rBits,1));
+
+        stego(pixel) = bitset( ...
+            stego(pixel),2,bitget(rBits,2));
+
+        stego(pixel) = bitset( ...
+            stego(pixel),3,bitget(rBits,3));
+
+        stego(coverPixels+pixel) = bitset( ...
+            stego(coverPixels+pixel),1,bitget(gBits,1));
+
+        stego(coverPixels+pixel) = bitset( ...
+            stego(coverPixels+pixel),2,bitget(gBits,2));
+
+        stego(coverPixels+pixel) = bitset( ...
+            stego(coverPixels+pixel),3,bitget(gBits,3));
+
+        stego(2*coverPixels+pixel) = bitset( ...
+            stego(2*coverPixels+pixel),1,bitget(bBits,1));
+
+        stego(2*coverPixels+pixel) = bitset( ...
+            stego(2*coverPixels+pixel),2,bitget(bBits,2));
 
     end
 
-    encryptedRecovered = reshape( ...
-        encryptedRecovered, ...
-        [rowsReceived colsReceived]);
+    elapsedTime = toc;
 
-    rng(10);
-
-    pnReceived = uint8( ...
-        randi([0 255], ...
-        [rowsReceived colsReceived]));
-
-    recoveredDecimated = bitxor( ...
-        encryptedRecovered,pnReceived);
-
-    reconstructed = imresize( ...
-        recoveredDecimated, ...
-        size(secretOriginal), ...
-        'bilinear');
-
-    reconstructed = uint8(reconstructed);
-
-    mseDecimated = mean( ...
-        (double(secretDecimated(:))- ...
-        double(recoveredDecimated(:))).^2);
-
-    if mseDecimated == 0
-        psnrDecimated = Inf;
-    else
-        psnrDecimated = ...
-            10*log10(255^2/mseDecimated);
-    end
-
-    ssimDecimated = calculateSSIM( ...
-        secretDecimated,recoveredDecimated);
-
-    mseReconstructed = mean( ...
-        (double(secretOriginal(:))- ...
-        double(reconstructed(:))).^2);
-
-    if mseReconstructed == 0
-        psnrReconstructed = Inf;
-    else
-        psnrReconstructed = ...
-            10*log10(255^2/mseReconstructed);
-    end
-
-    ssimReconstructed = calculateSSIM( ...
-        secretOriginal,reconstructed);
+    imshow(stego,'Parent',ax6);
+    title(ax6,'Stego Image');
 
     mseStego = mean( ...
         (double(cover(:))- ...
@@ -388,111 +403,344 @@ function runPipeline(~,~)
 
     ssimStego = calculateSSIM(cover,stego);
 
-    reconstructionDifference = uint8(abs( ...
-        double(secretOriginal)- ...
-        double(reconstructed)));
-
-    imshow(secretOriginal,'Parent',ax1);
-    title(ax1,'Original Secret');
-
-    imshow(secretSampled,'Parent',ax2);
-    title(ax2,'Sampled Secret');
-
-    imshow(secretQuantized,'Parent',ax3);
-    title(ax3,'Quantized Secret');
-
-    imshow(secretDecimated,'Parent',ax4);
-    title(ax4,'Decimated Secret');
-
-    imshow(encrypted,'Parent',ax5);
-    title(ax5,'PN Scrambled');
-
-    imshow(stego,'Parent',ax6);
-    title(ax6,'Stego Image');
-
-    imshow(recoveredDecimated,'Parent',ax7);
-    title(ax7,'Recovered Decimated');
-
-    imshow(reconstructed,'Parent',ax8);
-    title(ax8,'Reconstructed Image');
-
-    imshow(reconstructionDifference,'Parent',ax9);
-    title(ax9,'Reconstruction Difference');
-
     resultsArea.Value = { ...
-        'V7 DSP SECURE IMAGE STEGANOGRAPHY'; ...
+        'V8 EMBEDDING COMPLETE'; ...
         ''; ...
         'DSP PARAMETERS'; ...
-        sprintf('Sampling Factor   : %d',samplingFactor); ...
-        sprintf('Quantization      : %d levels',numberOfLevels); ...
-        sprintf('Decimation Factor : %d',decimationFactor); ...
-        'Interpolation     : Bilinear'; ...
+        'Sampling Factor   : 2'; ...
+        'Quantization      : 16 levels'; ...
+        'LSB Scheme        : 3-3-2 RGB'; ...
+        'Security          : PIN-based PN scrambling'; ...
         ''; ...
-        'IMAGE SIZES'; ...
-        sprintf('Original          : %d x %d', ...
-        size(secretOriginal,1), ...
-        size(secretOriginal,2)); ...
-        sprintf('Sampled           : %d x %d', ...
-        size(secretSampled,1), ...
-        size(secretSampled,2)); ...
-        sprintf('Quantized         : %d x %d', ...
-        size(secretQuantized,1), ...
-        size(secretQuantized,2)); ...
-        sprintf('Decimated         : %d x %d', ...
-        size(secretDecimated,1), ...
-        size(secretDecimated,2)); ...
-        sprintf('Reconstructed     : %d x %d', ...
-        size(reconstructed,1), ...
-        size(reconstructed,2)); ...
-        ''; ...
-        'DECIMATED RECOVERY'; ...
-        sprintf('MSE               : %.10f',mseDecimated); ...
-        sprintf('PSNR              : %.2f dB',psnrDecimated); ...
-        sprintf('SSIM              : %.6f',ssimDecimated); ...
-        ''; ...
-        'RECONSTRUCTION QUALITY'; ...
-        sprintf('MSE               : %.10f',mseReconstructed); ...
-        sprintf('PSNR              : %.2f dB',psnrReconstructed); ...
-        sprintf('SSIM              : %.6f',ssimReconstructed); ...
+        'PAYLOAD'; ...
+        sprintf('Payload bytes     : %d',requiredBytes); ...
+        sprintf('Cover pixels      : %d',coverPixels); ...
+        sprintf('Capacity usage    : %.2f %%', ...
+        100*requiredBytes/coverPixels); ...
         ''; ...
         'STEGO IMAGE QUALITY'; ...
         sprintf('MSE               : %.10f',mseStego); ...
         sprintf('PSNR              : %.2f dB',psnrStego); ...
-        sprintf('SSIM              : %.6f',ssimStego)};
+        sprintf('SSIM              : %.6f',ssimStego); ...
+        ''; ...
+        sprintf('Embedding Time    : %.4f s',elapsedTime); ...
+        ''; ...
+        'Use "Extract with PIN" to recover the secret.'};
+
+end
+
+function extractSecret(~,~)
+
+    if isempty(stego)
+
+        if isempty(cover)
+
+            uialert(fig, ...
+                'No stego image is available.', ...
+                'Extraction Error');
+
+            return;
+
+        else
+
+            uialert(fig, ...
+                'Run Embed Secret first.', ...
+                'Extraction Error');
+
+            return;
+
+        end
+
+    end
+
+    answer = inputdlg( ...
+        'Enter PIN used during embedding:', ...
+        'PIN Authentication', ...
+        [1 30], ...
+        {''});
+
+    if isempty(answer)
+        return;
+    end
+
+    pin = answer{1};
+
+    if isempty(pin)
+        uialert(fig, ...
+            'PIN cannot be empty.', ...
+            'Invalid PIN');
+        return;
+    end
+
+    tic;
+
+    coverPixels = size(stego,1)*size(stego,2);
+
+    extractedBits = zeros( ...
+        coverPixels*8,1,'uint8');
+
+    bitIndex = 1;
+
+    for pixel = 1:coverPixels
+
+        r = stego(pixel);
+        g = stego(coverPixels+pixel);
+        b = stego(2*coverPixels+pixel);
+
+        for bit = 1:3
+            extractedBits(bitIndex) = ...
+                bitget(r,bit);
+            bitIndex = bitIndex + 1;
+        end
+
+        for bit = 1:3
+            extractedBits(bitIndex) = ...
+                bitget(g,bit);
+            bitIndex = bitIndex + 1;
+        end
+
+        for bit = 1:2
+            extractedBits(bitIndex) = ...
+                bitget(b,bit);
+            bitIndex = bitIndex + 1;
+        end
+
+    end
+
+    headerBytes = zeros(8,1,'uint8');
+
+    index = 1;
+
+    for k = 1:8
+
+        value = uint8(0);
+
+        for bit = 1:8
+
+            value = bitset( ...
+                value, ...
+                bit, ...
+                extractedBits(index));
+
+            index = index + 1;
+
+        end
+
+        headerBytes(k) = value;
+
+    end
+
+    dimensions = typecast( ...
+        headerBytes,'uint32');
+
+    rows = double(dimensions(1));
+    cols = double(dimensions(2));
+
+    payloadLength = rows*cols*3;
+
+    if 8+payloadLength > coverPixels
+
+        uialert(fig, ...
+            'Invalid or corrupted stego image.', ...
+            'Extraction Error');
+
+        return;
+
+    end
+
+    scrambledVector = ...
+        zeros(payloadLength,1,'uint8');
+
+    for k = 1:payloadLength
+
+        value = uint8(0);
+
+        for bit = 1:8
+
+            value = bitset( ...
+                value, ...
+                bit, ...
+                extractedBits(64+(k-1)*8+bit));
+
+        end
+
+        scrambledVector(k) = value;
+
+    end
+
+    seed = createSeed(pin);
+
+    rng(seed);
+
+    pn = uint8( ...
+        randi([0 255],size(scrambledVector)));
+
+    recoveredVector = bitxor( ...
+        scrambledVector,pn);
+
+    recovered = reshape( ...
+        recoveredVector,[rows cols 3]);
+
+    recovered = uint8(recovered);
+
+    elapsedTime = toc;
+
+    imshow(scrambledVectorToImage( ...
+        scrambledVector,rows,cols), ...
+        'Parent',ax7);
+
+    title(ax7,'Extracted Data');
+
+    imshow(recovered,'Parent',ax8);
+    title(ax8,'Recovered Secret');
+
+    if ~isempty(secret)
+
+        if size(secret,1) ~= rows || ...
+           size(secret,2) ~= cols
+
+            referenceSecret = imresize( ...
+                secret,[rows cols]);
+
+        else
+
+            referenceSecret = secret;
+
+        end
+
+        difference = uint8(abs( ...
+            double(referenceSecret)- ...
+            double(recovered)));
+
+        imshow(difference,'Parent',ax9);
+        title(ax9,'Difference');
+
+        mseRecovery = mean( ...
+            (double(referenceSecret(:))- ...
+            double(recovered(:))).^2);
+
+        if mseRecovery == 0
+            psnrRecovery = Inf;
+        else
+            psnrRecovery = ...
+                10*log10(255^2/mseRecovery);
+        end
+
+        ssimRecovery = calculateSSIM( ...
+            referenceSecret,recovered);
+
+    else
+
+        mseRecovery = NaN;
+        psnrRecovery = NaN;
+        ssimRecovery = NaN;
+
+    end
+
+    if isempty(secret)
+
+        statusText = 'Recovered using entered PIN';
+
+    elseif mseRecovery == 0
+
+        statusText = 'CORRECT PIN - PERFECT RECOVERY';
+
+    else
+
+        statusText = 'PIN INCORRECT OR RECOVERY IS NOT EXACT';
+
+    end
+
+    cla(ax10);
+    axis(ax10,'off');
+
+    text(ax10,0.5,0.6, ...
+        statusText, ...
+        'HorizontalAlignment','center', ...
+        'FontSize',14, ...
+        'FontWeight','bold');
+
+    resultsArea.Value = { ...
+        'V8 EXTRACTION COMPLETE'; ...
+        ''; ...
+        sprintf('Recovered Size     : %d x %d x 3',rows,cols); ...
+        sprintf('Extraction Time    : %.4f s',elapsedTime); ...
+        ''; ...
+        'RECOVERY QUALITY'; ...
+        sprintf('MSE                : %.10f',mseRecovery); ...
+        sprintf('PSNR               : %.2f dB',psnrRecovery); ...
+        sprintf('SSIM               : %.6f',ssimRecovery); ...
+        ''; ...
+        ['STATUS             : ' statusText]};
+
+end
+
+function image = scrambledVectorToImage(vector,rows,cols)
+
+    image = reshape(vector,[rows cols 3]);
+
+end
+
+function seed = createSeed(pin)
+
+    values = double(pin);
+
+    seed = 5381;
+
+    for k = 1:length(values)
+
+        seed = mod( ...
+            seed*33 + values(k), ...
+            2147483646);
+
+    end
+
+    seed = seed + 1;
 
 end
 
 function clearAll(~,~)
 
     cover = [];
-    secretOriginal = [];
+    secret = [];
+    stego = [];
+    recovered = [];
 
-    cla(ax1);
-    cla(ax2);
-    cla(ax3);
-    cla(ax4);
-    cla(ax5);
-    cla(ax6);
-    cla(ax7);
-    cla(ax8);
-    cla(ax9);
+    for k = 1:length(axesList)
+        cla(axesList(k));
+        showPlaceholder( ...
+            axesList(k), ...
+            getTitle(k));
+    end
 
-    showPlaceholder(ax1,'Original Secret');
-    showPlaceholder(ax2,'Sampled Secret');
-    showPlaceholder(ax3,'Quantized Secret');
-    showPlaceholder(ax4,'Decimated Secret');
-    showPlaceholder(ax5,'PN Scrambled');
-    showPlaceholder(ax6,'Stego Image');
-    showPlaceholder(ax7,'Recovered Decimated');
-    showPlaceholder(ax8,'Reconstructed Image');
-    showPlaceholder(ax9,'Reconstruction Difference');
+    resultsArea.Value = { ...
+        'V8 DSP SECURE IMAGE STEGANOGRAPHY'; ...
+        ''; ...
+        'Ready for new images.'};
 
-    resultsArea.Value = {'Ready for new images.'};
+end
+
+function value = getTitle(k)
+
+    titles = { ...
+        'Cover Image', ...
+        'Original Secret', ...
+        'Sampled Secret', ...
+        'Quantized Secret', ...
+        'PN Scrambled', ...
+        'Stego Image', ...
+        'Extracted Data', ...
+        'Recovered Secret', ...
+        'Difference', ...
+        'Status'};
+
+    value = titles{k};
 
 end
 
 function showPlaceholder(ax,textValue)
 
+    cla(ax);
     title(ax,textValue);
     ax.XTick = [];
     ax.YTick = [];
@@ -503,6 +751,11 @@ function ssimValue = calculateSSIM(A,B)
 
     A = double(A);
     B = double(B);
+
+    if size(A,3) == 3
+        A = mean(A,3);
+        B = mean(B,3);
+    end
 
     muA = mean(A(:));
     muB = mean(B(:));
