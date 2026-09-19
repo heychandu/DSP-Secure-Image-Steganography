@@ -2,9 +2,9 @@ clc;
 clear;
 close all;
 
-%% V5 - Interpolation and Reconstruction
-% Sampling + Quantization + PN Scrambling + LSB Steganography
-% + Extraction + PN Descrambling + Interpolation
+%% V6 - Decimation and Reconstruction
+% Sampling + Quantization + Decimation + PN Scrambling
+% + LSB Steganography + Extraction + Interpolation
 
 %% 1. Load Cover Image
 
@@ -59,7 +59,15 @@ quantStep = 255/(numberOfLevels-1);
 secretQuantized = uint8( ...
     round(double(secretSampled)/quantStep)*quantStep);
 
-%% 5. Check Cover Capacity
+%% 5. Decimation
+
+decimationFactor = 2;
+
+secretDecimated = secretQuantized( ...
+    1:decimationFactor:end, ...
+    1:decimationFactor:end);
+
+%% 6. Check Cover Capacity
 
 maxSecretPixels = floor((numel(cover)-32)/8);
 
@@ -67,29 +75,29 @@ if maxSecretPixels < 1
     error('Cover image is too small.');
 end
 
-if numel(secretQuantized) > maxSecretPixels
+if numel(secretDecimated) > maxSecretPixels
 
-    scale = sqrt(maxSecretPixels / numel(secretQuantized));
+    scale = sqrt(maxSecretPixels / numel(secretDecimated));
 
-    newRows = max(1,floor(size(secretQuantized,1)*scale));
-    newCols = max(1,floor(size(secretQuantized,2)*scale));
+    newRows = max(1,floor(size(secretDecimated,1)*scale));
+    newCols = max(1,floor(size(secretDecimated,2)*scale));
 
-    secretQuantized = imresize( ...
-        secretQuantized,[newRows newCols]);
+    secretDecimated = imresize( ...
+        secretDecimated,[newRows newCols]);
 
 end
 
-%% 6. PN Sequence Scrambling
+%% 7. PN Sequence Scrambling
 
 rng(10);
 
 pn = uint8( ...
-    randi([0 255],size(secretQuantized)));
+    randi([0 255],size(secretDecimated)));
 
 encrypted = bitxor( ...
-    secretQuantized,pn);
+    secretDecimated,pn);
 
-%% 7. Convert Encrypted Image to Bits
+%% 8. Convert Encrypted Image to Bits
 
 encryptedVector = encrypted(:);
 
@@ -111,10 +119,10 @@ for k = 1:length(encryptedVector)
 
 end
 
-%% 8. Create Image Dimension Header
+%% 9. Create Image Dimension Header
 
-rows = size(secretQuantized,1);
-cols = size(secretQuantized,2);
+rows = size(secretDecimated,1);
+cols = size(secretDecimated,2);
 
 header = [uint16(rows); uint16(cols)];
 
@@ -137,7 +145,7 @@ for k = 1:length(headerBytes)
 
 end
 
-%% 9. Combine Header and Secret Data
+%% 10. Combine Header and Secret Data
 
 dataBits = [headerBits; secretBits];
 
@@ -147,7 +155,7 @@ if numel(dataBits) > numel(cover)
 
 end
 
-%% 10. LSB Embedding
+%% 11. LSB Embedding
 
 stegoVector = cover(:);
 
@@ -161,7 +169,7 @@ end
 stego = reshape( ...
     stegoVector,size(cover));
 
-%% 11. LSB Extraction
+%% 12. LSB Extraction
 
 stegoVector = stego(:);
 
@@ -175,7 +183,7 @@ for k = 1:length(dataBits)
 
 end
 
-%% 12. Extract Header
+%% 13. Extract Header
 
 headerBitsReceived = ...
     extractedBits(1:32);
@@ -209,7 +217,7 @@ dimensions = typecast( ...
 rowsReceived = double(dimensions(1));
 colsReceived = double(dimensions(2));
 
-%% 13. Extract Encrypted Image
+%% 14. Extract Encrypted Image
 
 numberOfSecretBits = ...
     rowsReceived * colsReceived * 8;
@@ -217,7 +225,7 @@ numberOfSecretBits = ...
 encryptedBits = extractedBits( ...
     33:32+numberOfSecretBits);
 
-%% 14. Convert Bits Back to Bytes
+%% 15. Convert Bits Back to Bytes
 
 encryptedRecovered = ...
     zeros(rowsReceived*colsReceived,1,'uint8');
@@ -242,13 +250,13 @@ for k = 1:length(encryptedRecovered)
 
 end
 
-%% 15. Reconstruct Encrypted Image
+%% 16. Reconstruct Encrypted Image
 
 encryptedRecovered = reshape( ...
     encryptedRecovered, ...
     [rowsReceived colsReceived]);
 
-%% 16. PN Descrambling
+%% 17. PN Descrambling
 
 rng(10);
 
@@ -256,35 +264,35 @@ pnReceived = uint8( ...
     randi([0 255], ...
     [rowsReceived colsReceived]));
 
-recoveredProcessed = bitxor( ...
+recoveredDecimated = bitxor( ...
     encryptedRecovered,pnReceived);
 
-%% 17. Interpolation
+%% 18. Interpolation
 
 reconstructed = imresize( ...
-    recoveredProcessed, ...
+    recoveredDecimated, ...
     size(secretOriginal), ...
     'bilinear');
 
 reconstructed = uint8(reconstructed);
 
-%% 18. Recovery Quality Before Interpolation
+%% 19. Decimated Image Recovery Quality
 
-mseProcessed = mean( ...
-    (double(secretQuantized(:)) - ...
-     double(recoveredProcessed(:))).^2);
+mseDecimated = mean( ...
+    (double(secretDecimated(:)) - ...
+     double(recoveredDecimated(:))).^2);
 
-if mseProcessed == 0
-    psnrProcessed = Inf;
+if mseDecimated == 0
+    psnrDecimated = Inf;
 else
-    psnrProcessed = ...
-        10*log10(255^2/mseProcessed);
+    psnrDecimated = ...
+        10*log10(255^2/mseDecimated);
 end
 
-ssimProcessed = calculateSSIM( ...
-    secretQuantized,recoveredProcessed);
+ssimDecimated = calculateSSIM( ...
+    secretDecimated,recoveredDecimated);
 
-%% 19. Reconstruction Quality
+%% 20. Reconstruction Quality
 
 mseReconstructed = mean( ...
     (double(secretOriginal(:)) - ...
@@ -300,7 +308,7 @@ end
 ssimReconstructed = calculateSSIM( ...
     secretOriginal,reconstructed);
 
-%% 20. Stego Image Quality
+%% 21. Stego Image Quality
 
 mseStego = mean( ...
     (double(cover(:)) - ...
@@ -315,93 +323,94 @@ end
 
 ssimStego = calculateSSIM(cover,stego);
 
-%% 21. Difference Images
-
-processedDifference = uint8(abs( ...
-    double(secretQuantized) - ...
-    double(recoveredProcessed)));
+%% 22. Difference Images
 
 reconstructionDifference = uint8(abs( ...
     double(secretOriginal) - ...
     double(reconstructed)));
 
-stegoDifference = uint8(abs( ...
-    double(cover) - ...
-    double(stego)));
-
-%% 22. Display Results
+%% 23. Display Results
 
 figure('Name', ...
-    'DSP Secure Image Steganography - V5', ...
+    'DSP Secure Image Steganography - V6', ...
     'NumberTitle','off');
 
-subplot(2,4,1);
+subplot(2,5,1);
 imshow(secretOriginal);
 title('Original Secret');
 
-subplot(2,4,2);
+subplot(2,5,2);
 imshow(secretSampled);
 title('Sampled Secret');
 
-subplot(2,4,3);
+subplot(2,5,3);
 imshow(secretQuantized);
 title('Quantized Secret');
 
-subplot(2,4,4);
+subplot(2,5,4);
+imshow(secretDecimated);
+title('Decimated Secret');
+
+subplot(2,5,5);
 imshow(encrypted);
 title('PN Scrambled');
 
-subplot(2,4,5);
+subplot(2,5,6);
 imshow(stego);
 title('Stego Image');
 
-subplot(2,4,6);
-imshow(recoveredProcessed);
-title('Recovered Processed');
+subplot(2,5,7);
+imshow(recoveredDecimated);
+title('Recovered Decimated');
 
-subplot(2,4,7);
+subplot(2,5,8);
 imshow(reconstructed);
-title('Interpolated Image');
+title('Reconstructed Image');
 
-subplot(2,4,8);
+subplot(2,5,9);
 imshow(reconstructionDifference);
 title('Reconstruction Difference');
 
-%% 23. Display Results
+%% 24. Display Results
 
-fprintf('\nV5 INTERPOLATION RESULTS\n');
+fprintf('\nV6 DECIMATION RESULTS\n');
 
 fprintf('\nDSP PARAMETERS\n');
 
-fprintf('Sampling Factor : %d\n',samplingFactor);
-fprintf('Quantization    : %d levels\n',numberOfLevels);
-fprintf('Interpolation   : Bilinear\n');
+fprintf('Sampling Factor   : %d\n',samplingFactor);
+fprintf('Quantization      : %d levels\n',numberOfLevels);
+fprintf('Decimation Factor : %d\n',decimationFactor);
+fprintf('Interpolation     : Bilinear\n');
 
 fprintf('\nIMAGE SIZES\n');
 
-fprintf('Original Secret : %d x %d\n', ...
+fprintf('Original Secret   : %d x %d\n', ...
     size(secretOriginal,1), ...
     size(secretOriginal,2));
 
-fprintf('Sampled Secret  : %d x %d\n', ...
+fprintf('Sampled Secret    : %d x %d\n', ...
     size(secretSampled,1), ...
     size(secretSampled,2));
 
-fprintf('Processed Image : %d x %d\n', ...
+fprintf('Quantized Secret  : %d x %d\n', ...
     size(secretQuantized,1), ...
     size(secretQuantized,2));
 
-fprintf('Reconstructed   : %d x %d\n', ...
+fprintf('Decimated Secret  : %d x %d\n', ...
+    size(secretDecimated,1), ...
+    size(secretDecimated,2));
+
+fprintf('Reconstructed     : %d x %d\n', ...
     size(reconstructed,1), ...
     size(reconstructed,2));
 
-fprintf('\nPROCESSED IMAGE RECOVERY\n');
+fprintf('\nDECIMATED IMAGE RECOVERY\n');
 
-fprintf('MSE  : %.10f\n',mseProcessed);
-fprintf('PSNR : %.2f dB\n',psnrProcessed);
-fprintf('SSIM : %.6f\n',ssimProcessed);
+fprintf('MSE  : %.10f\n',mseDecimated);
+fprintf('PSNR : %.2f dB\n',psnrDecimated);
+fprintf('SSIM : %.6f\n',ssimDecimated);
 
-fprintf('\nINTERPOLATED IMAGE QUALITY\n');
+fprintf('\nRECONSTRUCTED IMAGE QUALITY\n');
 
 fprintf('MSE  : %.10f\n',mseReconstructed);
 fprintf('PSNR : %.2f dB\n',psnrReconstructed);
@@ -413,7 +422,7 @@ fprintf('MSE  : %.10f\n',mseStego);
 fprintf('PSNR : %.2f dB\n',psnrStego);
 fprintf('SSIM : %.6f\n',ssimStego);
 
-%% 24. SSIM Function
+%% 25. SSIM Function
 
 function ssimValue = calculateSSIM(A,B)
 
